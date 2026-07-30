@@ -9,20 +9,24 @@ const io = new Server(server, {
     cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
+// Basic HTTP health check endpoint for Render
+app.get('/', (req, res) => {
+    res.send('Speed Games Betting Engine & Socket Server Running');
+});
+
 // ==========================================
 // 1. GAME CONFIGURATION & STATE
 // ==========================================
 const CONFIG = {
     HOUSE_MARGIN: 0.06,      // 6% target house profit (94% RTP)
-    BET_TIME: 60,            // Seconds players can bet
-    DRAW_TIME: 18,           // Seconds for draw animation (matches frontend ~0.8s interval x 20)
+    BET_TIME: 30,            // Seconds players can bet
+    DRAW_TIME: 18,           // Seconds for draw animation
     RESULT_TIME: 7,          // Seconds to view final results
     GRID_SIZE: 80,           // Keno 80-number grid
     DRAW_COUNT: 20,          // 20 numbers drawn per round
     SIMULATION_TRIALS: 200   // Candidate combinations tested for risk
 };
 
-// Full Keno Payout Odds matching client-side expectations
 const PAYOUT_TABLE = {
     1: { 1: 3.5 },
     2: { 1: 1, 2: 10 },
@@ -36,20 +40,50 @@ const PAYOUT_TABLE = {
     10: { 0: 2, 5: 5, 6: 30, 7: 100, 8: 300, 9: 2000, 10: 10000 }
 };
 
+// In-Memory Database for active user balances & redemptions
+const usersDB = new Map();
+
+// Active Admin Deposit Configuration (Fetched by frontend modal)
+const adminDepositConfig = {
+    accountNumber: "+251945754766",
+    accountHolder: "Speed Games Official Admin"
+};
+
+// Active Promo Coupons
+const PROMO_COUPONS = {
+    'SPEED100': 100.00,
+    'WELCOME50': 50.00,
+    'BONUS20': 20.00
+};
+
 let gameState = {
-    roundId: Math.floor(100000 + Math.random() * 900000), // Clean numeric ID format
-    phase: 'BETTING', // 'BETTING', 'DRAWING', 'RESULT' (Frontend expects 'RESULT' not 'RESULTS')
+    roundId: Math.floor(100000 + Math.random() * 900000),
+    phase: 'BETTING', // 'BETTING', 'DRAWING', 'RESULT'
     timer: CONFIG.BET_TIME,
-    endTime: Date.now() + (CONFIG.BET_TIME * 1000), // Timestamp required by frontend smooth timer
+    endTime: Date.now() + (CONFIG.BET_TIME * 1000),
     winningNumbers: [],
     activeBets: [],
     totalPool: 0,
-    globalResults: [] // Stores last 10 completed draws
+    globalResults: []
 };
 
 // ==========================================
 // 2. HELPER UTILITIES & CRYPTO RNG
 // ==========================================
+
+function getOrCreateUser(userId, name = 'Player', phone = '') {
+    if (!usersDB.has(userId)) {
+        usersDB.set(userId, {
+            id: userId,
+            name: name,
+            phone: phone,
+            balance: 50.00, // Starting bonus balance for testing
+            redeemedCoupons: new Set(),
+            transactions: []
+        });
+    }
+    return usersDB.get(userId);
+}
 
 function getSecureRandomInt(min, max) {
     const range = max - min + 1;
@@ -70,7 +104,7 @@ function generateRandomDraw() {
     while (numbers.size < CONFIG.DRAW_COUNT) {
         numbers.add(getSecureRandomInt(1, CONFIG.GRID_SIZE));
     }
-    return Array.from(numbers); // Unsorted draw order feels more authentic
+    return Array.from(numbers);
 }
 
 function evaluatePoolPayout(drawnNumbers, bets) {
@@ -89,7 +123,6 @@ function evaluatePoolPayout(drawnNumbers, bets) {
     return totalPayout;
 }
 
-// Helper to broadcast uniform sync state
 function getBroadcastStatePayload() {
     return {
         phase: gameState.phase,
@@ -153,16 +186,28 @@ function gameLoop() {
                 break;
 
             case 'DRAWING':
-                gameState.phase = 'RESULT'; // Fixed: Matched with Frontend expected string 'RESULT'
+                gameState.phase = 'RESULT';
                 gameState.timer = CONFIG.RESULT_TIME;
                 gameState.endTime = Date.now() + (CONFIG.RESULT_TIME * 1000);
                 
-                const totalPayout = evaluatePoolPayout(gameState.winningNumbers, gameState.activeBets);
-                const houseProfit = gameState.totalPool - totalPayout;
-                
-                console.log(`[ROUND ${gameState.roundId} END] Pool: ${gameState.totalPool} ETB | Payout: ${totalPayout} ETB | Profit: ${houseProfit} ETB`);
+                const drawnSet = new Set(gameState.winningNumbers);
 
-                // Push to global result history (Keep last 10)
+                // Pay out winning tickets to user balances
+                for (const bet of gameState.activeBets) {
+                    const hits = bet.numbers.filter(num => drawnSet.has(num)).length;
+                    const spot = bet.numbers.length;
+
+                    if (PAYOUT_TABLE[spot] && PAYOUT_TABLE[spot][hits]) {
+                        const winAmount = bet.stake * PAYOUT_TABLE[spot][hits];
+                        const user = usersDB.get(bet.userId);
+                        if (user) {
+                            user.balance += winAmount;
+                            io.to(bet.socketId).emit('balanceUpdate', { balance: user.balance });
+                        }
+                    }
+                }
+
+                // Push to global result history
                 gameState.globalResults.push({
                     id: gameState.roundId,
                     numbers: [...gameState.winningNumbers].sort((a, b) => a - b)
@@ -184,7 +229,6 @@ function gameLoop() {
         }
     }
 
-    // Broadcast sync pulse to all connected clients
     io.emit('gameStateUpdate', getBroadcastStatePayload());
 }
 
@@ -196,26 +240,53 @@ setInterval(gameLoop, 1000);
 io.on('connection', (socket) => {
     console.log(`Client connected: ${socket.id}`);
 
-    // Send full current state upon joining
     socket.emit('gameStateUpdate', getBroadcastStatePayload());
+    // Send admin deposit account configuration to client on connection
+    socket.emit('adminDepositInfo', adminDepositConfig);
 
-    // Handle incoming ticket bets
+    // Initialize/Sync User State
+    socket.on('initUser', (data) => {
+        if (!data || !data.userId) return;
+        
+        socket.userId = data.userId;
+        const user = getOrCreateUser(data.userId, data.name, data.phone);
+        
+        socket.emit('balanceUpdate', { balance: user.balance });
+    });
+
+    socket.on('requestBalance', (data) => {
+        const uId = data?.userId || socket.userId;
+        if (uId && usersDB.has(uId)) {
+            socket.emit('balanceUpdate', { balance: usersDB.get(uId).balance });
+        }
+    });
+
+    // Handle Keno Ticket Bet Placement
     socket.on('placeBet', (data) => {
         if (gameState.phase !== 'BETTING') {
             return socket.emit('betError', { message: "Betting phase closed!" });
         }
 
-        // Adapted to handle both `bet` and `stake` property keys from client
         const betAmount = parseFloat(data.bet || data.stake);
+        const uId = data.userId || socket.userId;
+        const user = usersDB.get(uId);
+
+        if (!user || user.balance < betAmount) {
+            return socket.emit('betError', { message: "Insufficient account balance." });
+        }
 
         if (!data.numbers || !Array.isArray(data.numbers) || data.numbers.length === 0 || isNaN(betAmount) || betAmount <= 0) {
             return socket.emit('betError', { message: "Invalid bet payload." });
         }
 
+        // Deduct balance instantly
+        user.balance -= betAmount;
+        socket.emit('balanceUpdate', { balance: user.balance });
+
         const ticket = {
             ticketId: data.id || Date.now(),
             socketId: socket.id,
-            userId: data.userId || 'guest',
+            userId: uId,
             numbers: data.numbers,
             stake: betAmount
         };
@@ -223,8 +294,112 @@ io.on('connection', (socket) => {
         gameState.activeBets.push(ticket);
         gameState.totalPool += ticket.stake;
 
-        socket.emit('betSuccess', { message: "Ticket accepted!", ticket });
+        socket.emit('betSuccess', { message: "Ticket accepted!", ticket, newBalance: user.balance });
         io.emit('gameStateUpdate', getBroadcastStatePayload());
+    });
+
+    // Handle Telebirr Deposit Verification SMS Submission
+    socket.on('submitDeposit', (data) => {
+        const uId = data.userId || socket.userId;
+        const user = usersDB.get(uId);
+
+        if (!user) {
+            return socket.emit('depositError', { message: "User session not found." });
+        }
+
+        const amount = parseFloat(data.amount);
+        if (isNaN(amount) || amount <= 0) {
+            return socket.emit('depositError', { message: "Invalid deposit amount." });
+        }
+
+        // Process deposit & credit balance
+        user.balance += amount;
+        user.transactions.push({
+            id: Date.now(),
+            type: 'DEPOSIT',
+            amount: amount,
+            sms: data.smsText,
+            timestamp: new Date()
+        });
+
+        console.log(`[DEPOSIT CONFIRMED] User: ${uId} | Added: ${amount} ETB | New Balance: ${user.balance} ETB`);
+
+        socket.emit('depositSuccess', {
+            message: `Deposit of ${amount} ETB successfully processed!`,
+            balance: user.balance
+        });
+        socket.emit('balanceUpdate', { balance: user.balance });
+    });
+
+    // Handle Withdrawal Request Sent to Admin
+    socket.on('submitWithdrawal', (data) => {
+        const uId = data.userId || socket.userId;
+        const user = usersDB.get(uId);
+
+        if (!user) {
+            return socket.emit('withdrawResponse', { success: false, message: "User session not found." });
+        }
+
+        const amount = parseFloat(data.amount);
+        if (isNaN(amount) || amount < 100) {
+            return socket.emit('withdrawResponse', { success: false, message: "Minimum withdrawal is 100 ETB." });
+        }
+
+        if (user.balance < amount) {
+            return socket.emit('withdrawResponse', { success: false, message: "Insufficient balance." });
+        }
+
+        // Deduct balance for withdrawal
+        user.balance -= amount;
+        user.transactions.push({
+            id: Date.now(),
+            type: 'WITHDRAWAL',
+            bank: data.bank,
+            accountNumber: data.accountNumber,
+            receiverName: data.receiverName,
+            amount: amount,
+            status: 'PENDING',
+            timestamp: new Date()
+        });
+
+        console.log(`[WITHDRAWAL REQUEST] User: ${uId} | Bank: ${data.bank} | Acc: ${data.accountNumber} | Name: ${data.receiverName} | Amount: ${amount} ETB`);
+
+        socket.emit('withdrawResponse', {
+            success: true,
+            message: `Withdrawal request of ${amount} ETB sent to admin successfully!`,
+            amount: amount
+        });
+        socket.emit('balanceUpdate', { balance: user.balance });
+    });
+
+    // Handle Promo Coupon Redemption
+    socket.on('redeemCoupon', (data) => {
+        const uId = data.userId || socket.userId;
+        const user = usersDB.get(uId);
+
+        if (!user) {
+            return socket.emit('couponResult', { success: false, message: "User session error." });
+        }
+
+        const code = (data.code || '').trim().toUpperCase();
+
+        if (!PROMO_COUPONS[code]) {
+            return socket.emit('couponResult', { success: false, message: "Invalid or expired coupon code." });
+        }
+
+        if (user.redeemedCoupons.has(code)) {
+            return socket.emit('couponResult', { success: false, message: "You have already redeemed this coupon!" });
+        }
+
+        const bonusAmount = PROMO_COUPONS[code];
+        user.balance += bonusAmount;
+        user.redeemedCoupons.add(code);
+
+        socket.emit('couponResult', {
+            success: true,
+            message: `🎉 Success! Received ${bonusAmount} ETB bonus credit.`
+        });
+        socket.emit('balanceUpdate', { balance: user.balance });
     });
 
     socket.on('disconnect', () => {
@@ -234,6 +409,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Keno Game Engine running on port ${PORT}`);
+    console.log(`Speed Games Engine running on port ${PORT}`);
 });
-
