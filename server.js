@@ -19,7 +19,7 @@ app.get('/', (req, res) => {
 // ==========================================
 const CONFIG = {
     HOUSE_MARGIN: 0.06,      // 6% target house profit (94% RTP)
-    BET_TIME: 30,            // Seconds players can bet
+    BET_TIME: 60,            // Seconds players can bet
     DRAW_TIME: 18,           // Seconds for draw animation
     RESULT_TIME: 7,          // Seconds to view final results
     GRID_SIZE: 80,           // Keno 80-number grid
