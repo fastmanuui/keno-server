@@ -10,7 +10,7 @@ const io = new Server(server, { cors: { origin: '*', methods: ['GET', 'POST'] } 
 
 // Configure these in your hosting provider's environment settings.
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://khdrauqyqzayrnrlhlgv.supabase.co';
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
 if (!SUPABASE_KEY) throw new Error('Missing SUPABASE_KEY environment variable');
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -200,12 +200,12 @@ function createPool(supabase){let state={balance:0,house:0,window:[]};let queue=
    const{data,error}=await supabase.from('hc2_pool').select('*').eq('id',1).maybeSingle();
    if(error){console.error('[HC2] pool load error:',error.message);throw error;}
    if(!data) throw new Error('Missing hc2_pool row id=1. Run the SQL migration.');
-   state={balance:Number(data.balance),house:Number(data.house),window:Array.isArray(data.window)?data.window:[]};
+   state={balance:Number(data.balance),house:Number(data.house),window:Array.isArray(data.bet_window)?data.bet_window:[]};
    if(!Number.isFinite(state.balance)||state.balance<0||!Number.isFinite(state.house)||state.house<0) throw new Error('Invalid HC2 pool values in database.');
    loaded=true;
  }
  async function save(){
-   const{data,error}=await supabase.from('hc2_pool').update({balance:round2(state.balance),house:round2(state.house),window:state.window,updated_at:new Date().toISOString()}).eq('id',1).select('id').maybeSingle();
+   const{data,error}=await supabase.from('hc2_pool').update({balance:round2(state.balance),house:round2(state.house),bet_window:state.window,updated_at:new Date().toISOString()}).eq('id',1).select('id').maybeSingle();
    if(error) throw error;
    if(!data) throw new Error('HC2 pool row id=1 was not updated.');
  }
