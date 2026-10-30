@@ -180,8 +180,8 @@ const COINS=['mini.png','minor.png','major.png','grand.png','crown_coin.png','co
 const COIN_VALUES={'coin_1.png':1,'coin_2.png':2,'coin_5.png':5,'coin_10.png':10,'coin_15.png':15,'crown_coin.png':1,'mini.png':25,'minor.png':50,'major.png':150,'grand.png':1000};
 const PAYOUTS={'sevens.png':50,'stars.png':30,'bells.png':20,'watermelon.png':16,'grapes.png':16,'plum.png':4,'lemon.png':4,'orange.png':4,'cherries.png':1};
 const PAYLINES=[[[1,0],[1,1],[1,2]],[[0,0],[0,1],[0,2]],[[2,0],[2,1],[2,2]],[[0,0],[1,1],[2,2]],[[2,0],[1,1],[0,2]]];
-const LANDING_MATH={bonusChance:0.03,singleCoinChance:0.30,middleReel:0.15,middleReelCoin:'crown_coin.png'};
-const LANDING_COIN_WEIGHTS={'coin_1.png':20,'coin_2.png':20,'coin_5.png':20,'coin_10.png':10,'coin_15.png':8,'crown_coin.png':5,'mini.png':0.3,'minor.png':0.2,'major.png':0.1,'grand.png':0.01};
+const LANDING_MATH={bonusChance:0.03,singleCoinChance:0.30,middleReel:1,middleReelCoin:'crown_coin.png'};
+const LANDING_COIN_WEIGHTS={'coin_1.png':20,'coin_2.png':20,'coin_5.png':20,'coin_10.png':10,'coin_15.png':8,'mini.png':0.3,'minor.png':0.2,'major.png':0.1,'grand.png':0.01};
 const COLLECT_COIN_WEIGHTS={'coin_1.png':25,'coin_2.png':10,'coin_5.png':1,'coin_10.png':0.05,'coin_15.png':0.03,'crown_coin.png':0.1,'mini.png':0.01,'minor.png':0.009,'major.png':0.01,'grand.png':0.001};
 const COLLECT_MATH={leftCoinChance:0.05,rightCoinChance:0.04,newCollectorChance:0.3,maxCollectors:3};
 const rnd=()=>crypto.randomInt(0,2**32)/2**32;
