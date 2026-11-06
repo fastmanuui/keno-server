@@ -188,7 +188,7 @@ const rnd=()=>crypto.randomInt(0,2**32)/2**32;
 const rndInt=n=>crypto.randomInt(0,n);
 function weighted(list,getW){const total=list.reduce((s,x)=>s+getW(x),0);let v=rnd()*total;for(const x of list){v-=getW(x);if(v<0)return x;}return list[list.length-1];}
 const pickFruit=()=>weighted(FRUITS,e=>e[1])[0];
-const pickCoin=w=>weighted(COINS,n=>w[n]||1);
+const pickCoin=w=>weighted(COINS.filter(n=>n!=='crown_coin.png'),n=>w[n]??1);
 const pickLandingCoin=reel=>reel===LANDING_MATH.middleReel?LANDING_MATH.middleReelCoin:pickCoin(LANDING_COIN_WEIGHTS);
 const isCoin=n=>COINS.includes(n);
 const round2=n=>Math.round(n*100)/100;
